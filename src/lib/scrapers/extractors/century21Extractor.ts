@@ -54,244 +54,57 @@ export const century21Extractor: PortalExtractor = {
     
     console.log(`Extractor Century21: Encontrados ${jsonLdArray.length} objetos JSON-LD`);
     
-    // a) Extraer imágenes del JSON-LD (fuente más completa generalmente)
-    if (jsonLd.image) {
-      if (Array.isArray(jsonLd.image)) {
-        console.log(`Extractor Century21: Encontradas ${jsonLd.image.length} imágenes en array JSON-LD`);
-        jsonLd.image.forEach((img: any) => {
-          if (typeof img === 'string' && img.trim()) {
-            console.log(`Añadiendo imagen de JSON-LD array: ${img.substring(0, 100)}...`);
-            imageSet.add(img.trim());
-          } else if (typeof img === 'object' && img !== null) {
-            // Algunos JSON-LD usan objetos con propiedad 'url' para imágenes
-            const imgObj = img as Record<string, any>;
-            if (typeof imgObj.url === 'string' && imgObj.url.trim()) {
-              console.log(`Añadiendo imagen de JSON-LD objeto: ${imgObj.url.substring(0, 100)}...`);
-              imageSet.add(imgObj.url.trim());
-            }
-          }
+    // IMPLEMENTACIÓN MEJORADA: Extraer SOLO imágenes de propiedades del JSON-LD
+    if (jsonLd && jsonLd['@type'] === 'RealEstateListing' && Array.isArray(jsonLd.image)) {
+      console.log(`Extractor Century21: Encontradas ${jsonLd.image.length} imágenes en array JSON-LD`);
+      
+      // Filtrar para incluir solo URLs de propiedades
+      const propertyImages = jsonLd.image
+        .filter((img: unknown): img is string => {
+          return typeof img === 'string' && 
+                 img.includes('/propiedades/') && 
+                 !img.includes('/logos/') && 
+                 !img.includes('/usuarios/');
         });
-      } else if (typeof jsonLd.image === 'string' && (jsonLd.image as string).trim()) {
-        // Si es una sola string
-        console.log(`Añadiendo imagen única de JSON-LD: ${(jsonLd.image as string).substring(0, 100)}...`);
-        imageSet.add((jsonLd.image as string).trim());
-      } else if (typeof jsonLd.image === 'object' && jsonLd.image !== null) {
-        // Si es un objeto (algunos formatos usan esto)
-        const imgObj = jsonLd.image as Record<string, any>;
-        if (typeof imgObj.url === 'string' && imgObj.url.trim()) {
-          console.log(`Añadiendo imagen de objeto JSON-LD: ${imgObj.url.substring(0, 100)}...`);
-          imageSet.add(imgObj.url.trim());
+      
+      console.log(`Después de filtrar, quedan ${propertyImages.length} imágenes de propiedades`);
+      
+      // Crear un mapa para eliminar duplicados basados en el nombre del archivo
+      const uniqueImagesMap = new Map<string, string>();
+      
+      for (const imageUrl of propertyImages) {
+        try {
+          // Extraer el nombre base del archivo de la URL
+          const urlObj = new URL(imageUrl);
+          const pathname = urlObj.pathname;
+          const filename = pathname.substring(pathname.lastIndexOf('/') + 1);
+          
+          // Solo agregamos si no existe ya este nombre de archivo
+          if (filename && !uniqueImagesMap.has(filename)) {
+            uniqueImagesMap.set(filename, imageUrl);
+          }
+        } catch (e) {
+          // Si hay un error al procesar la URL, simplemente la saltamos
+          continue;
         }
       }
+      
+      // Convertir el mapa a array y añadir al conjunto
+      const uniqueImages = Array.from(uniqueImagesMap.values());
+      uniqueImages.forEach(url => imageSet.add(url));
+      
+      console.log(`Después de eliminar duplicados, quedan ${uniqueImages.length} imágenes únicas`);
     } else {
-      console.log('No se encontraron imágenes en el JSON-LD principal');
-    }
-    
-    // Si no encontramos imágenes en el JSON-LD principal, buscar en todos los objetos JSON-LD
-    if (imageSet.size === 0 && jsonLdArray.length > 0) {
-      console.log('Buscando imágenes en todos los objetos JSON-LD disponibles...');
+      console.log('No se encontró JSON-LD de tipo RealEstateListing con array de imágenes');
       
-      for (const obj of jsonLdArray) {
-        if (obj.image) {
-          console.log(`Encontrado objeto JSON-LD con propiedad image de tipo ${typeof obj.image}`);
-          
-          if (Array.isArray(obj.image)) {
-            obj.image.forEach((img: any) => {
-              if (typeof img === 'string' && img.trim()) {
-                console.log(`Añadiendo imagen de array: ${img.substring(0, 100)}...`);
-                imageSet.add(img.trim());
-              }
-            });
-          } else if (typeof obj.image === 'string') {
-            console.log(`Añadiendo imagen string: ${obj.image.substring(0, 100)}...`);
-            imageSet.add(obj.image);
-          }
-        }
-      }
-    }
-    
-    // b) Buscar en todas las galerías y sliders de la página
-    // Galería principal
-    $('#fotos img, #fotosDestacadas img, .carousel-item img').each((_, img) => {
-      const src = $(img).attr('src') || $(img).attr('data-src');
-      if (src && src.trim()) {
-        console.log(`Añadiendo imagen de galería: ${src}`);
-        imageSet.add(src);
-      }
-    });
-    
-    // Galería secundaria
-    $('.row.gx-1.gy-1.rcol img, .property-image img, .property-thumbs img').each((_, img) => {
-      const src = $(img).attr('src') || $(img).attr('data-src');
-      if (src && src.trim()) {
-        console.log(`Añadiendo imagen de galería secundaria: ${src}`);
-        imageSet.add(src);
-      }
-    });
-    
-    // c) Buscar en cualquier contenedor de imágenes con clases comunes
-    $('.gallery img, .slider img, .carousel img, .photos img').each((_, img) => {
-      const src = $(img).attr('src') || $(img).attr('data-src');
-      if (src && src.trim()) {
-        console.log(`Añadiendo imagen de contenedor común: ${src}`);
-        imageSet.add(src);
-      }
-    });
-    
-    // d) Revisar imágenes desde los metadatos
-    if (metadata['og:image']) {
-      console.log(`Añadiendo imagen de Open Graph: ${metadata['og:image']}`);
-      imageSet.add(metadata['og:image']);
-    }
-    
-    // e) Buscar cualquier otro tag de imagen que pueda contener propiedad
-    $('img[alt*="propiedad"], img[alt*="inmueble"], img[alt*="casa"], img[alt*="departamento"]').each((_, img) => {
-      const src = $(img).attr('src');
-      if (src && src.trim() && !src.includes('logo') && !src.includes('icon')) {
-        console.log(`Añadiendo imagen con alt relevante: ${src}`);
-        imageSet.add(src);
-      }
-    });
-    
-    // f) Verificar si hay un indicador del número total de fotos en la página
-    const fotosCountText = $('.btn.btn-primary').text().trim();
-    const fotosCountMatch = fotosCountText.match(/(\d+)\s+Fotos/i);
-    const expectedFotosCount = fotosCountMatch && fotosCountMatch[1] ? parseInt(fotosCountMatch[1]) : 0;
-    console.log(`Indicador de cantidad de fotos en HTML: "${fotosCountText}", número esperado: ${expectedFotosCount}`);
-    
-    // g) Si tenemos pocas imágenes, buscar en todas las etiquetas img dentro de ciertos contenedores
-    if (imageSet.size < 5) {
-      console.log('Pocas imágenes encontradas, buscando en todas las etiquetas img...');
-      
-      // Extensiones comunes de imágenes
-      const imageExtensionsPattern = /\.(jpe?g|png|gif|webp|bmp)(\?[^?]*)?$/i;
-      
-      $('img').each((_, img) => {
-        const src = $(img).attr('src');
-        if (src && src.trim() && (src.startsWith('http://') || src.startsWith('https://'))) {
-          if (src.includes('cdn.21online.lat') && src.includes('propiedades') && imageExtensionsPattern.test(src)) {
-            console.log(`Añadiendo imagen del tag <img>: ${src}`);
-            imageSet.add(src);
-          }
-        }
-      });
-    }
-    
-    // h) Buscar patrones específicos de URLs de imágenes en Century21 en todo el HTML
-    const c21UrlPattern = /https?:\/\/cdn\.21online\.lat\/mexico\/cache\/[^"']+\/propiedades\/[^"']+\.(jpe?g|png|gif|webp)/gi;
-    const htmlAsString = $.html();
-    const c21UrlMatches = htmlAsString.match(c21UrlPattern);
-    
-    if (c21UrlMatches && c21UrlMatches.length > 0) {
-      console.log(`Encontradas ${c21UrlMatches.length} URLs específicas de imágenes Century21`);
-      c21UrlMatches.forEach(imgUrl => {
-        if (imgUrl) {
-          console.log(`Añadiendo URL específica de Century21: ${imgUrl}`);
-          imageSet.add(imgUrl);
-        }
-      });
-    }
-    
-    // i) Buscar ALL posibles urls de imágenes de Century21 directamente en el HTML
-    console.log("Intentando extraer TODAS las imágenes posibles del HTML completo...");
-    
-    // Patrón más amplio para capturar todas las URLs de imágenes en todo el HTML
-    const allImgUrlPattern = /["'](https?:\/\/[^"']+?\/(?:propiedades|uploads)\/[^"']+?\/[^"']+?\.(jpe?g|png|gif|webp))["']/gi;
-    let allMatches;
-    const foundUrls = new Set<string>();
-    
-    // Recolectar todas las URLs que coincidan con el patrón
-    while ((allMatches = allImgUrlPattern.exec(htmlAsString)) !== null) {
-      if (allMatches[1] && !foundUrls.has(allMatches[1])) {
-        foundUrls.add(allMatches[1]);
-      }
-    }
-    
-    console.log(`Encontradas ${foundUrls.size} URLs únicas de imágenes en el HTML bruto`);
-    
-    // Añadir cada URL encontrada al set de imágenes
-    foundUrls.forEach(url => {
-      console.log(`Añadiendo URL encontrada en HTML bruto: ${url}`);
-      imageSet.add(url);
-    });
-    
-    // j) Intentar extraer JSON directamente del HTML si tenemos pocas imágenes
-    if (imageSet.size < 10) {
-      console.log("Pocas imágenes encontradas, buscando bloques JSON en scripts...");
-      
-      // Buscar objetos JSON en scripts que contengan arrays de imágenes
-      const scriptBlocks = htmlAsString.match(/<script[^>]*>([\s\S]*?)<\/script>/gi) || [];
-      console.log(`Analizando ${scriptBlocks.length} bloques de script en busca de arrays JSON...`);
-      
-      for (const scriptBlock of scriptBlocks) {
-        // Buscar posibles arrays JSON que contengan URLs de imágenes
-        const arrayMatches = scriptBlock.match(/\[\s*"https?:\/\/[^"]+\.(jpe?g|png|gif|webp)"/gi);
-        if (arrayMatches && arrayMatches.length > 0) {
-          console.log(`Encontrado posible array JSON con URLs de imágenes: ${arrayMatches[0].substring(0, 100)}...`);
-          
-          try {
-            // Intentar extraer el array completo
-            const arrayStart = scriptBlock.indexOf(arrayMatches[0]);
-            if (arrayStart >= 0) {
-              let bracketCount = 0;
-              let inQuote = false;
-              let escapeNext = false;
-              let endPos = -1;
-              
-              for (let i = arrayStart; i < scriptBlock.length; i++) {
-                const char = scriptBlock[i];
-                
-                if (escapeNext) {
-                  escapeNext = false;
-                  continue;
-                }
-                
-                if (char === '\\') {
-                  escapeNext = true;
-                  continue;
-                }
-                
-                if (char === '"' && !escapeNext) {
-                  inQuote = !inQuote;
-                  continue;
-                }
-                
-                if (!inQuote) {
-                  if (char === '[') bracketCount++;
-                  else if (char === ']') {
-                    bracketCount--;
-                    if (bracketCount === 0) {
-                      endPos = i + 1;
-                      break;
-                    }
-                  }
-                }
-              }
-              
-              if (endPos > arrayStart) {
-                const jsonArray = scriptBlock.substring(arrayStart, endPos);
-                console.log(`Extrayendo array JSON: ${jsonArray.substring(0, 100)}...`);
-                
-                try {
-                  const parsed = JSON.parse(jsonArray);
-                  console.log(`¡Array JSON parseado con éxito! Contiene ${parsed.length} elementos`);
-                  
-                  // Añadir todas las URLs al set de imágenes
-                  parsed.forEach((url: string) => {
-                    if (typeof url === 'string' && url.match(/https?:\/\/.*\.(jpe?g|png|gif|webp)/i)) {
-                      console.log(`Añadiendo URL de array JSON: ${url}`);
-                      imageSet.add(url);
-                    }
-                  });
-                } catch (e) {
-                  console.log(`Error al parsear array JSON: ${e}`);
-                }
-              }
-            }
-          } catch (e) {
-            console.log(`Error al procesar posible array JSON: ${e}`);
-          }
-        }
+      // FALLBACK: Solo si no encontramos imágenes en el JSON-LD principal, usar Open Graph
+      if (metadata['og:image'] && 
+          typeof metadata['og:image'] === 'string' &&
+          metadata['og:image'].includes('/propiedades/') && 
+          !metadata['og:image'].includes('/logos/') && 
+          !metadata['og:image'].includes('/usuarios/')) {
+        console.log(`Añadiendo imagen de Open Graph como fallback: ${metadata['og:image']}`);
+        imageSet.add(metadata['og:image']);
       }
     }
     

@@ -22,6 +22,13 @@ export const env = createEnv({
       .enum(["development", "test", "production"])
       .default("development"),
     SUPABASE_SERVICE_ROLE_KEY: z.string(),
+    // Variables de OpenAI
+    GPT_API_KEY: process.env.NODE_ENV === "production"
+        ? z.string()
+        : z.string().optional(),
+    GPT_API_URL: process.env.NODE_ENV === "production"
+        ? z.string().url()
+        : z.string().url().default("https://api.openai.com/v1/chat/completions"),
   },
 
   /**
@@ -48,6 +55,9 @@ export const env = createEnv({
     NEXT_PUBLIC_SUPABASE_URL: process.env.NEXT_PUBLIC_SUPABASE_URL,
     NEXT_PUBLIC_SUPABASE_ANON_KEY: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
     SUPABASE_SERVICE_ROLE_KEY: process.env.SUPABASE_SERVICE_ROLE_KEY,
+    // Variables de OpenAI
+    GPT_API_KEY: process.env.GPT_API_KEY,
+    GPT_API_URL: process.env.GPT_API_URL,
   },
   /**
    * Run `build` or `dev` with `SKIP_ENV_VALIDATION` to skip env validation. This is especially

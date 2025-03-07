@@ -27,92 +27,78 @@ export const genericExtractor: PortalExtractor = {
     const metadata = extractMetadata(html);
     const jsonLdArray = extractJsonLd(html);
     
-    // Buscar JSON-LD relacionado con propiedades inmobiliarias
-    const jsonLd = jsonLdArray.find(item => 
-      item['@type'] === 'RealEstateListing' || 
-      item['@type'] === 'Product' || 
-      item['@type'] === 'Place' ||
-      item['@type'] === 'Residence' ||
-      item['@type'] === 'ApartmentComplex'
-    ) as JsonLdData || {};
-    
-    // 1. Extraer imágenes
+    // INICIO: IMPLEMENTACIÓN ESTRICTA DE EXTRACCIÓN DE IMÁGENES
     let imagenes: string[] = [];
     
-    // a) Extraer imágenes del JSON-LD
-    if (jsonLd.image) {
-      if (Array.isArray(jsonLd.image)) {
-        // Si es un array, añadir cada URL de imagen
-        jsonLd.image.forEach(img => {
-          if (typeof img === 'string' && img.trim()) {
-            imagenes.push(img.trim());
-          } else if (typeof img === 'object' && img !== null) {
-            // Algunos JSON-LD usan objetos con propiedad 'url' para imágenes
-            const imgObj = img as Record<string, any>;
-            if (typeof imgObj.url === 'string' && imgObj.url.trim()) {
-              imagenes.push(imgObj.url.trim());
-            }
-          }
+    // Método principal: Extraer SOLO y EXCLUSIVAMENTE del array "image" del JSON-LD de tipo "RealEstateListing"
+    const realEstateJsonLd = jsonLdArray.find(item => 
+      typeof item === 'object' && 
+      item !== null && 
+      item['@type'] === 'RealEstateListing' &&
+      Array.isArray(item.image)
+    ) as JsonLdData | undefined;
+    
+    if (realEstateJsonLd && Array.isArray(realEstateJsonLd.image)) {
+      // Filtrar rigurosamente para asegurar solo imágenes de propiedades
+      const propertyImages = realEstateJsonLd.image
+        .filter((url: unknown): url is string => {
+          // Verificar que sea string
+          if (typeof url !== 'string') return false;
+          
+          // Solo incluir URLs específicas de propiedades, excluir logos y perfiles
+          return url.includes('/propiedades/') && 
+                 !url.includes('/logos/') && 
+                 !url.includes('/usuarios/');
         });
-      } else if (typeof jsonLd.image === 'string' && (jsonLd.image as string).trim()) {
-        // Si es una sola string
-        imagenes.push((jsonLd.image as string).trim());
-      } else if (typeof jsonLd.image === 'object' && jsonLd.image !== null) {
-        // Si es un objeto (algunos formatos usan esto)
-        const imgObj = jsonLd.image as Record<string, any>;
-        if (typeof imgObj.url === 'string' && imgObj.url.trim()) {
-          imagenes.push(imgObj.url.trim());
+      
+      // Crear un mapa para eliminar duplicados por nombre de archivo
+      const uniqueImagesMap = new Map<string, string>();
+      
+      for (const imageUrl of propertyImages) {
+        try {
+          // Extraer el nombre base del archivo de la URL
+          const urlObj = new URL(imageUrl);
+          const pathname = urlObj.pathname;
+          const filename = pathname.substring(pathname.lastIndexOf('/') + 1);
+          
+          // Solo agregamos si no existe ya este nombre de archivo
+          if (filename && !uniqueImagesMap.has(filename)) {
+            uniqueImagesMap.set(filename, imageUrl);
+          }
+        } catch (e) {
+          // Si hay un error al procesar la URL, simplemente la saltamos
+          continue;
         }
       }
-    }
-    
-    // b) Extraer imágenes de metadatos Open Graph
-    if (metadata['og:image']) {
-      imagenes.push(metadata['og:image']);
-    }
-    
-    // c) Extraer imágenes de metadatos Twitter
-    if (metadata['twitter:image']) {
-      imagenes.push(metadata['twitter:image']);
-    }
-    
-    // d) Buscar imágenes en la galería (patrones comunes)
-    $('div.gallery img, div.carousel img, div.slider img, .photos img, .images img, .property-images img').each((_, img) => {
-      const src = $(img).attr('src') || $(img).attr('data-src') || $(img).attr('data-lazy-src');
-      if (src) imagenes.push(src);
-    });
-    
-    // e) Buscar imágenes con atributos específicos
-    $('img[alt*="propiedad"], img[alt*="inmueble"], img[alt*="casa"], img[alt*="departamento"], img[alt*="property"]').each((_, img) => {
-      const src = $(img).attr('src') || $(img).attr('data-src');
-      if (src) imagenes.push(src);
-    });
-    
-    // f) Buscar imágenes grandes (probablemente son de la propiedad)
-    $('img').each((_, img) => {
-      const width = parseInt($(img).attr('width') || '0', 10);
-      const height = parseInt($(img).attr('height') || '0', 10);
       
-      // Si la imagen es grande, probablemente es de la propiedad
-      if (width > 400 || height > 400) {
-        const src = $(img).attr('src') || $(img).attr('data-src');
-        if (src) imagenes.push(src);
-      }
-    });
+      // Convertir el mapa a array
+      imagenes = Array.from(uniqueImagesMap.values());
+      
+      console.log(`[Extractor Genérico] Se extrajeron exactamente ${imagenes.length} imágenes únicas de propiedades.`);
+    }
     
-    // Eliminar duplicados
-    imagenes = [...new Set(imagenes)];
+    // SOLO como fallback, si no se encontraron imágenes, usar Open Graph
+    if (imagenes.length === 0 && typeof metadata['og:image'] === 'string') {
+      const ogImage = metadata['og:image'];
+      if (ogImage.includes('/propiedades/') && 
+          !ogImage.includes('/logos/') && 
+          !ogImage.includes('/usuarios/')) {
+        imagenes.push(ogImage);
+        console.log(`[Extractor Genérico] Fallback: Se extrajo 1 imagen de Open Graph metadata`);
+      }
+    }
+    // FIN: IMPLEMENTACIÓN ESTRICTA DE EXTRACCIÓN DE IMÁGENES
     
     // 2. Extraer precio
     let precioMXN = '';
     let precioUSD = '';
     
     // a) Buscar en JSON-LD
-    if (jsonLd.offers?.price && jsonLd.offers?.priceCurrency) {
-      if (jsonLd.offers.priceCurrency === 'MXN') {
-        precioMXN = `$${jsonLd.offers.price} MXN`;
-      } else if (jsonLd.offers.priceCurrency === 'USD') {
-        precioUSD = `$${jsonLd.offers.price} USD`;
+    if (realEstateJsonLd?.offers?.price && realEstateJsonLd?.offers?.priceCurrency) {
+      if (realEstateJsonLd.offers.priceCurrency === 'MXN') {
+        precioMXN = `$${realEstateJsonLd.offers.price} MXN`;
+      } else if (realEstateJsonLd.offers.priceCurrency === 'USD') {
+        precioUSD = `$${realEstateJsonLd.offers.price} USD`;
       }
     }
     
@@ -170,17 +156,21 @@ export const genericExtractor: PortalExtractor = {
     let ubicacion = '';
     
     // a) Buscar en JSON-LD
-    if (jsonLd.address) {
-      const address = jsonLd.address;
+    if (realEstateJsonLd?.address) {
+      const address = realEstateJsonLd.address;
       if (typeof address === 'string') {
         ubicacion = address;
-      } else if (address.streetAddress) {
-        ubicacion = [
+      } else if (typeof address === 'object' && address !== null) {
+        const addressParts = [
           address.streetAddress,
           address.addressLocality,
           address.addressRegion,
           address.postalCode
-        ].filter(Boolean).join(', ');
+        ].filter(part => typeof part === 'string' && part.trim() !== '');
+        
+        if (addressParts.length > 0) {
+          ubicacion = addressParts.join(', ');
+        }
       }
     }
     
@@ -222,8 +212,8 @@ export const genericExtractor: PortalExtractor = {
     let descripcion = '';
     
     // a) Buscar en JSON-LD
-    if (jsonLd.description) {
-      descripcion = jsonLd.description;
+    if (realEstateJsonLd?.description && typeof realEstateJsonLd.description === 'string') {
+      descripcion = realEstateJsonLd.description;
     }
     
     // b) Buscar en metadatos
@@ -271,175 +261,125 @@ export const genericExtractor: PortalExtractor = {
     ];
     
     for (const selector of caracteristicasSelectors) {
-      const container = $(selector);
-      if (container.length) {
-        // Buscar elementos li o div dentro del contenedor
-        container.find('li, div').each((_, elem) => {
+      const elements = $(selector).find('li, div, span, p');
+      if (elements.length) {
+        elements.each((_, elem) => {
           const text = $(elem).text().trim();
-          if (text.includes(':')) {
-            const [key, value] = text.split(':', 2);
-            caracteristicas[key.trim()] = value.trim();
-          } else if (text) {
-            caracteristicas[text] = 'Sí';
+          if (text) {
+            // Detectar si es una característica con valor
+            const match = text.match(/^(.+?):\s*(.+)$/);
+            if (match) {
+              const key = cleanText(match[1]);
+              const value = cleanText(match[2]);
+              
+              // Asignar a detalles o características según el tipo
+              if (['metros', 'área', 'superficie', 'm2', 'baños', 'recámaras', 'habitaciones', 'pisos'].some(keyword => 
+                typeof key === 'string' && typeof keyword === 'string' && 
+                key.toLowerCase().includes(keyword.toLowerCase())
+              )) {
+                detalles[key] = value;
+              } else {
+                caracteristicas[key] = value;
+              }
+            } else {
+              // Es una característica sin valor
+              caracteristicas[text] = 'Sí';
+            }
           }
         });
       }
     }
     
-    // b) Buscar elementos con atributos específicos
-    $('[data-feature], [data-spec], [data-detail]').each((_, elem) => {
-      const keyAttr = $(elem).attr('data-feature') || $(elem).attr('data-spec') || $(elem).attr('data-detail');
-      if (keyAttr) {
-        const value = $(elem).text().trim();
-        caracteristicas[keyAttr] = value;
-      }
-    });
+    // b) Buscar elementos específicos de características comunes
+    const specificFeatures = [
+      { selector: '.bedrooms, [data-bedrooms], .habitaciones, .recamaras', key: 'Habitaciones' },
+      { selector: '.bathrooms, [data-bathrooms], .banos', key: 'Baños' },
+      { selector: '.garages, [data-garages], .estacionamientos', key: 'Estacionamientos' },
+      { selector: '.area, [data-area], .superficie, .metros', key: 'Área' }
+    ];
     
-    // c) Extraer detalles específicos (terreno, construcción, recámaras, baños, etc.)
-    const detailsMap: Record<string, string[]> = {
-      'terreno': ['terreno', 'superficie', 'lote', 'lot', 'land', 'area'],
-      'construccion': ['construcción', 'construido', 'built', 'construction'],
-      'recamaras': ['recámaras', 'habitaciones', 'dormitorios', 'bedrooms', 'rooms'],
-      'banos': ['baños', 'bathrooms', 'wc'],
-      'estacionamientos': ['estacionamientos', 'cocheras', 'parking', 'garage'],
-      'antiguedad': ['antigüedad', 'edad', 'año', 'age', 'year built'],
-      'niveles': ['niveles', 'pisos', 'plantas', 'floors', 'stories']
-    };
-    
-    // Buscar en metadatos
-    if (metadata['MT']) detalles.terreno = `${metadata['MT']} m²`;
-    if (metadata['MC']) detalles.construccion = `${metadata['MC']} m²`;
-    if (metadata['recamaras']) detalles.recamaras = metadata['recamaras'];
-    if (metadata['banio'] || metadata['banos']) {
-      const banioValue = metadata['banio'] || metadata['banos'];
-      if (banioValue) {
-        detalles.banos = banioValue;
-      }
-    }
-    if (metadata['estacionamiento']) detalles.estacionamientos = metadata['estacionamiento'];
-    
-    // Buscar en características
-    for (const [key, value] of Object.entries(caracteristicas)) {
-      for (const [detailKey, keywords] of Object.entries(detailsMap)) {
-        if (keywords.some(keyword => key.toLowerCase().includes(keyword))) {
-          detalles[detailKey] = value;
-          break;
+    for (const { selector, key } of specificFeatures) {
+      const element = $(selector).first();
+      if (element.length) {
+        // Extraer solo números si es posible
+        const numValue = extractNumber(element.text());
+        if (numValue) {
+          detalles[key] = numValue.toString();
+        } else {
+          detalles[key] = element.text().trim();
         }
       }
     }
     
-    // 6. Extraer tipo de propiedad y operación
-    let tipo = '';
-    let operacion = '';
-    
-    // a) Buscar en metadatos
-    if (metadata['tipoInmueble']) {
-      tipo = metadata['tipoInmueble'];
-    }
-    
-    if (metadata['tipoOperacion']) {
-      operacion = metadata['tipoOperacion'];
-    }
-    
-    // b) Buscar en el título de la página
-    const title = $('title').text() || metadata['og:title'] || '';
-    
-    // Detectar tipo de propiedad
-    const tipoPatterns = [
-      { pattern: /casa/i, value: 'casa' },
-      { pattern: /departamento|apartamento/i, value: 'departamento' },
-      { pattern: /terreno|lote/i, value: 'terreno' },
-      { pattern: /oficina/i, value: 'oficina' },
-      { pattern: /local/i, value: 'local' },
-      { pattern: /bodega/i, value: 'bodega' }
-    ];
-    
-    for (const { pattern, value } of tipoPatterns) {
-      if (pattern.test(title) && !tipo) {
-        tipo = value;
-        break;
-      }
-    }
-    
-    // Detectar tipo de operación
-    const operacionPatterns = [
-      { pattern: /venta|compra|comprar/i, value: 'venta' },
-      { pattern: /renta|alquiler|rentar/i, value: 'renta' }
-    ];
-    
-    for (const { pattern, value } of operacionPatterns) {
-      if (pattern.test(title) && !operacion) {
-        operacion = value;
-        break;
-      }
-    }
-    
-    // 7. Extraer resumen
-    let resumen = '';
-    
-    // Buscar elementos que podrían contener un resumen
-    const resumenSelectors = [
-      '.summary', '.resumen', '.overview', '.property-summary',
-      'h2 + p', 'h3 + p', '.property-overview p'
-    ];
-    
-    for (const selector of resumenSelectors) {
-      const resumenElem = $(selector).first();
-      if (resumenElem.length) {
-        resumen = resumenElem.text().trim();
-        if (resumen) break;
-      }
-    }
-    
-    // Si no hay resumen, usar las primeras líneas de la descripción
-    if (!resumen && descripcion) {
-      const lines = descripcion.split('\n');
-      if (lines.length > 0) {
-        resumen = lines[0];
-        if (lines.length > 1) {
-          resumen += ' ' + lines[1];
-        }
-      }
-    }
-    
-    // 8. Extraer amenidades
-    const amenidades: string[] = [];
-    
-    // Buscar elementos que podrían contener amenidades
-    const amenidadesSelectors = [
-      '.amenities', '.amenidades', '.features', '.property-amenities',
-      '.listing-amenities', '#amenities'
-    ];
-    
-    for (const selector of amenidadesSelectors) {
-      const container = $(selector);
-      if (container.length) {
-        container.find('li, div').each((_, elem) => {
-          const text = $(elem).text().trim();
-          if (text && !text.includes(':')) {
-            amenidades.push(text);
+    // c) Extraer cualquier dato adicional del JSON-LD
+    if (realEstateJsonLd) {
+      // Extraer detalles específicos que podrían estar en el JSON-LD
+      const detailsMapping: Record<string, string> = {
+        'numberOfRooms': 'Habitaciones',
+        'numberOfBedrooms': 'Recámaras',
+        'numberOfBathroomsTotal': 'Baños',
+        'floorSize': 'Área Construida',
+        'lotSize': 'Tamaño Terreno'
+      };
+      
+      for (const [jsonKey, displayKey] of Object.entries(detailsMapping)) {
+        // Usar aserción de tipo para evitar errores de TypeScript
+        const value = (realEstateJsonLd as Record<string, any>)[jsonKey];
+        if (value !== undefined) {
+          if (typeof value === 'object' && value !== null && 'value' in value) {
+            detalles[displayKey] = value.value.toString();
+          } else if (typeof value === 'number' || typeof value === 'string') {
+            detalles[displayKey] = value.toString();
           }
-        });
+        }
       }
     }
     
-    // Construir y devolver el objeto Propiedad
+    // 6. Extraer título
+    let titulo = '';
+    
+    // a) Buscar en JSON-LD
+    if (realEstateJsonLd?.name && typeof realEstateJsonLd.name === 'string') {
+      titulo = realEstateJsonLd.name;
+    }
+    
+    // b) Buscar en metadatos
+    if (!titulo && metadata['og:title']) {
+      titulo = metadata['og:title'];
+    }
+    
+    if (!titulo && metadata['title']) {
+      titulo = metadata['title'];
+    }
+    
+    // c) Buscar en elementos H1, H2
+    if (!titulo) {
+      const h1 = $('h1').first();
+      if (h1.length) {
+        titulo = h1.text().trim();
+      } else {
+        const h2 = $('h2').first();
+        if (h2.length) {
+          titulo = h2.text().trim();
+        }
+      }
+    }
+    
+    // Construir el objeto de propiedad
     return {
-      descripcion,
-      caracteristicas,
-      resumen,
-      imagenes,
+      id: '', // Se generará después
+      resumen: cleanText(titulo),
+      descripcion: cleanText(descripcion),
+      ubicacion: cleanText(ubicacion),
       precio: {
-        mxn: precioMXN,
-        usd: precioUSD
+        mxn: precioMXN || '',
+        usd: precioUSD || ''
       },
-      ubicacion,
-      url,
-      tipo,
-      operacion,
+      caracteristicas,
       detalles,
-      amenidades,
-      portal: 'unknown'
+      imagenes,
+      url,
+      portal: 'generic'
     };
   }
 }; 

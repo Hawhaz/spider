@@ -12,12 +12,7 @@ export default function UrlScraperPage() {
       <div className="container mx-auto py-10 px-4">
         <header className="mb-10 text-center">
           <div className="flex justify-center items-center mb-4">
-            <Link 
-              href="/setup"
-              className="ml-4 px-3 py-1 text-xs font-medium bg-indigo-600/30 hover:bg-indigo-600/50 text-indigo-300 rounded-full border border-indigo-600/50 transition-colors duration-200 absolute right-4 top-4 sm:static"
-            >
-              ⚙️ Configuración
-            </Link>
+            {/* Configuration button removed */}
           </div>
           <h1 className="text-3xl sm:text-4xl font-bold bg-gradient-to-r from-indigo-500 to-purple-600 bg-clip-text text-transparent">
             URL Scraper
